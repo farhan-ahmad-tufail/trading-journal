@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { fetchTrades, deleteTrade, updateTrade } from '@/lib/db';
-import { Trade, TradeDirection, TradeStatus } from '@/types';
+import { fetchTrades, deleteTrade, updateTrade, saveTrade, isMockMode } from '@/lib/db';
+import { Trade, TradeDirection, TradeStatus, TradingSession } from '@/types';
 import { useAccount } from '@/components/AccountProvider';
 import Link from 'next/link';
 import { 
@@ -17,7 +17,10 @@ import {
   Pencil,
   X,
   CheckCircle2,
-  Lock
+  Lock,
+  Upload,
+  FileSpreadsheet,
+  AlertCircle
 } from 'lucide-react';
 
 type SortField = 'open_time' | 'pnl' | 'lot_size';
@@ -54,7 +57,6 @@ interface EditModalProps {
 function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
   const isOpen = trade.status === 'OPEN';
 
-  // Editable fields
   const [exitPrice, setExitPrice] = useState(trade.exit_price ? String(trade.exit_price) : '');
   const [entryPrice, setEntryPrice] = useState(String(trade.entry_price));
   const [stopLoss, setStopLoss] = useState(String(trade.stop_loss));
@@ -69,12 +71,10 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
 
   const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Close on overlay click
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
   };
 
-  // Derived live PnL preview
   const entryNum = parseFloat(entryPrice);
   const exitNum = parseFloat(exitPrice);
   const sizeNum = parseFloat(lotSize);
@@ -91,7 +91,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
     const tp = parseFloat(takeProfit);
     const size = parseFloat(lotSize);
 
-    // Validations
     if (isNaN(entry) || entry <= 0) return setError('Entry Price must be a valid positive number.');
     if (exit !== null && (isNaN(exit) || exit <= 0)) return setError('Exit Price must be a valid positive number.');
     if (isNaN(sl) || sl <= 0) return setError('Stop Loss must be a valid positive number.');
@@ -131,9 +130,7 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
       onClick={handleOverlayClick}
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-end"
     >
-      {/* Slide-in Panel */}
       <div className="w-full max-w-md h-full bg-zinc-950 border-l border-zinc-900 flex flex-col animate-in slide-in-from-right duration-200 font-sans overflow-y-auto">
-        {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-zinc-900">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-base font-bold text-white">
@@ -151,10 +148,7 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex flex-col gap-5 p-6 flex-1">
-
-          {/* Error banner */}
           {error && (
             <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 px-4 py-3 rounded-md text-red-400 text-sm">
               <ShieldAlert size={16} className="shrink-0 mt-0.5" />
@@ -162,7 +156,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             </div>
           )}
 
-          {/* Info badge */}
           {isOpen && (
             <div className="flex items-start gap-2.5 bg-amber-500/5 border border-amber-500/15 px-4 py-3 rounded-md text-amber-500 text-xs">
               <Lock size={14} className="shrink-0 mt-0.5" />
@@ -170,7 +163,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             </div>
           )}
 
-          {/* Entry Price */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs text-zinc-500 font-medium">Entry Price</label>
             <input
@@ -183,7 +175,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             />
           </div>
 
-          {/* Exit Price */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs text-zinc-500 font-medium">
               Exit Price {isOpen && <span className="text-amber-500 font-bold">*</span>}
@@ -200,7 +191,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             />
           </div>
 
-          {/* SL & TP */}
           <div className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs text-zinc-500 font-medium">Stop Loss (SL)</label>
@@ -226,7 +216,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             </div>
           </div>
 
-          {/* Lot Size */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs text-zinc-500 font-medium">Volume (Lots)</label>
             <input
@@ -239,7 +228,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             />
           </div>
 
-          {/* Close Time (shown when exit price is entered or trade is being closed) */}
           {(exitPrice || !isOpen) && (
             <div className="flex flex-col gap-1.5">
               <label className="text-xs text-zinc-500 font-medium">Close Date & Time</label>
@@ -252,7 +240,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             </div>
           )}
 
-          {/* PnL Preview */}
           {livePnl !== null && (
             <div className={`flex items-center justify-between px-4 py-3 rounded-lg border text-sm font-bold ${
               livePnl >= 0
@@ -264,7 +251,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
             </div>
           )}
 
-          {/* Notes */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs text-zinc-500 font-medium">Notes (optional)</label>
             <textarea
@@ -277,7 +263,6 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
           </div>
         </div>
 
-        {/* Footer Actions */}
         <div className="flex gap-3 p-6 border-t border-zinc-900 bg-zinc-950 sticky bottom-0">
           <button
             onClick={onClose}
@@ -309,6 +294,303 @@ function EditTradeModal({ trade, onClose, onSave }: EditModalProps) {
   );
 }
 
+// ─── MT5 Import Modal ──────────────────────────────────────────────────────
+interface ImportModalProps {
+  accountId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function ImportMT5Modal({ accountId, onClose, onSuccess }: ImportModalProps) {
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [parsedPreview, setParsedPreview] = useState<any[]>([]);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragActive(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      setFile(droppedFile);
+      setParsedPreview([]);
+      setError(null);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      setFile(selectedFile);
+      setParsedPreview([]);
+      setError(null);
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('accountId', accountId);
+
+    try {
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to import report.');
+      }
+
+      if (data.isMockMode && data.trades) {
+        // In local mock mode, show the preview to the user before appending to localStorage
+        setParsedPreview(data.trades);
+      } else {
+        // Real Supabase insertion succeeded directly
+        onSuccess();
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred during file parsing.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmMockImport = async () => {
+    if (parsedPreview.length === 0) return;
+    setLoading(true);
+    try {
+      // Fetch existing trades to prevent duplicate local imports
+      const existingTrades = await fetchTrades(accountId);
+      const existingTickets = new Set(existingTrades.map(t => String(t.external_ticket)));
+
+      let insertedCount = 0;
+      // Loop over parsed preview and save new ones locally
+      for (const pt of parsedPreview) {
+        if (!existingTickets.has(String(pt.external_ticket))) {
+          await saveTrade({
+            account_id: accountId,
+            pair: pt.pair,
+            direction: pt.direction,
+            session: pt.open_time ? getSessionFromTime(pt.open_time) : 'LONDON',
+            setup_grade: 'B',
+            pre_trade_state: 'Focused',
+            entry_price: pt.entry_price,
+            exit_price: pt.exit_price,
+            stop_loss: pt.stop_loss,
+            take_profit: pt.take_profit,
+            lot_size: pt.lot_size,
+            notes: `Imported from MT5 Statement (Ticket: ${pt.external_ticket})`,
+            pnl: pt.pnl,
+            status: 'CLOSED',
+            open_time: pt.open_time,
+            close_time: pt.close_time,
+            setup_tags: ['Imported'],
+            external_ticket: pt.external_ticket
+          });
+          insertedCount++;
+        }
+      }
+
+      alert(`Successfully imported ${insertedCount} new trades.`);
+      onSuccess();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save trades to local mock storage.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getSessionFromTime = (timeString: string): TradingSession => {
+    const date = new Date(timeString);
+    const hour = date.getUTCHours();
+    if (hour >= 0 && hour < 8) return 'ASIAN';
+    if (hour >= 8 && hour < 13) return 'LONDON';
+    if (hour >= 13 && hour < 17) return 'LONDON_NY';
+    return 'NEW_YORK';
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-zinc-950 border border-zinc-900 rounded-xl flex flex-col font-sans max-h-[85vh] overflow-hidden shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-zinc-900">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-lg bg-indigo-600/10 border border-indigo-500/25 flex items-center justify-center text-indigo-400">
+              <FileSpreadsheet size={18} />
+            </div>
+            <div className="flex flex-col">
+              <h2 className="text-base font-bold text-white">Import MetaTrader 5 Statement</h2>
+              <p className="text-xs text-zinc-500">Upload HTML reports or CSV logs to sync history.</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900 transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 flex-1 overflow-y-auto flex flex-col gap-4">
+          {error && (
+            <div className="flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 p-4 rounded-md text-red-400 text-xs">
+              <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {parsedPreview.length === 0 ? (
+            <>
+              {/* File Dropzone */}
+              <div
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${
+                  isDragActive
+                    ? 'border-indigo-500 bg-indigo-650/[0.04]'
+                    : 'border-zinc-800 bg-zinc-900/10 hover:border-zinc-700 hover:bg-zinc-900/20'
+                }`}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept=".csv,.txt,.html,.htm"
+                  className="hidden"
+                />
+                <Upload size={32} className={isDragActive ? 'text-indigo-400' : 'text-zinc-600'} />
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-zinc-200">
+                    {file ? file.name : 'Drag & drop MT5 report file here'}
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Supports MT5 Closed Positions HTML reports or CSV exports'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Tips banner */}
+              <div className="flex items-start gap-3 bg-zinc-900/30 border border-zinc-900/60 p-4 rounded-lg text-zinc-400 text-xs leading-relaxed">
+                <AlertCircle size={16} className="text-indigo-400 shrink-0 mt-0.5" />
+                <div className="flex flex-col gap-1">
+                  <span className="font-semibold text-zinc-200">How to get MT5 reports:</span>
+                  <span><strong>HTML:</strong> Open MT5 Terminal &rarr; History Tab &rarr; Right click &rarr; Report &rarr; HTML.</span>
+                  <span><strong>CSV:</strong> Select History &rarr; Right click &rarr; Export to CSV.</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* Parsed Preview Table */
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-zinc-400">Parsed Trades Preview ({parsedPreview.length} found)</span>
+                <span className="text-[10px] bg-indigo-600/15 border border-indigo-500/20 px-2 py-0.5 rounded text-indigo-400 font-bold">Local Mock Mode</span>
+              </div>
+              
+              <div className="border border-zinc-900 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-zinc-900/40 border-b border-zinc-900 text-zinc-500 font-bold uppercase tracking-wider">
+                      <th className="px-4 py-2">Ticket</th>
+                      <th className="px-4 py-2">Symbol</th>
+                      <th className="px-4 py-2">Dir</th>
+                      <th className="px-4 py-2">Lots</th>
+                      <th className="px-4 py-2">Entry</th>
+                      <th className="px-4 py-2">Exit</th>
+                      <th className="px-4 py-2">Profit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-900/60 text-zinc-300">
+                    {parsedPreview.map((pt, idx) => {
+                      const profitVal = Number(pt.pnl || 0);
+                      return (
+                        <tr key={idx} className="hover:bg-zinc-900/20">
+                          <td className="px-4 py-1.5 font-mono">{pt.external_ticket}</td>
+                          <td className="px-4 py-1.5 font-bold text-white">{pt.pair}</td>
+                          <td className="px-4 py-1.5">
+                            <span className={pt.direction === 'LONG' ? 'text-emerald-500' : 'text-red-500'}>
+                              {pt.direction}
+                            </span>
+                          </td>
+                          <td className="px-4 py-1.5">{pt.lot_size}</td>
+                          <td className="px-4 py-1.5 font-mono">{Number(pt.entry_price).toFixed(4)}</td>
+                          <td className="px-4 py-1.5 font-mono">{Number(pt.exit_price).toFixed(4)}</td>
+                          <td className="px-4 py-1.5 font-semibold">
+                            <span className={profitVal >= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                              {profitVal >= 0 ? '+' : ''}${profitVal.toFixed(2)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="flex gap-3 p-6 border-t border-zinc-900 bg-zinc-950 sticky bottom-0">
+          <button
+            onClick={parsedPreview.length > 0 ? () => setParsedPreview([]) : onClose}
+            className="flex-1 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-semibold text-sm rounded-md py-2.5 transition-colors cursor-pointer"
+          >
+            {parsedPreview.length > 0 ? 'Back' : 'Cancel'}
+          </button>
+          
+          {parsedPreview.length === 0 ? (
+            <button
+              onClick={handleUpload}
+              disabled={!file || loading}
+              className="flex-1 bg-indigo-650 hover:bg-indigo-500 disabled:bg-indigo-900 text-white font-semibold text-sm rounded-md py-2.5 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+              ) : (
+                <span>Upload & Parse</span>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={handleConfirmMockImport}
+              disabled={loading}
+              className="flex-1 bg-emerald-650 hover:bg-emerald-500 disabled:bg-emerald-900 text-white font-semibold text-sm rounded-md py-2.5 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+              ) : (
+                <span>Confirm Mock Import</span>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main History Page ────────────────────────────────────────────────────
 export default function HistoryPage() {
   const { activeAccount, loading: accountLoading } = useAccount();
@@ -316,13 +598,12 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  // Search & Filter state
   const [search, setSearch] = useState('');
   const [filterDirection, setFilterDirection] = useState<'ALL' | TradeDirection>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | TradeStatus>('ALL');
 
-  // Sorting state
   const [sortField, setSortField] = useState<SortField>('open_time');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
 
@@ -371,7 +652,11 @@ export default function HistoryPage() {
     }
   };
 
-  // 1. Filter
+  const handleImportSuccess = () => {
+    setIsImportModalOpen(false);
+    loadTrades();
+  };
+
   const filteredTrades = trades.filter((trade) => {
     const matchesSearch = trade.pair.toUpperCase().includes(search.toUpperCase());
     const matchesDirection = filterDirection === 'ALL' || trade.direction === filterDirection;
@@ -379,7 +664,6 @@ export default function HistoryPage() {
     return matchesSearch && matchesDirection && matchesStatus;
   });
 
-  // 2. Sort
   const sortedTrades = [...filteredTrades].sort((a, b) => {
     let valA: any = a[sortField] !== undefined ? a[sortField] : 0;
     let valB: any = b[sortField] !== undefined ? b[sortField] : 0;
@@ -428,12 +712,19 @@ export default function HistoryPage() {
 
   return (
     <>
-      {/* Edit / Close Modal */}
       {editingTrade && (
         <EditTradeModal
           trade={editingTrade}
           onClose={() => setEditingTrade(null)}
           onSave={handleEditSave}
+        />
+      )}
+
+      {isImportModalOpen && (
+        <ImportMT5Modal
+          accountId={activeAccount.id}
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={handleImportSuccess}
         />
       )}
 
@@ -443,8 +734,17 @@ export default function HistoryPage() {
             <h1 className="text-2xl font-bold tracking-tight text-white">Trade History</h1>
             <p className="text-sm text-zinc-400">Search, filter, and manage your logged trades database.</p>
           </div>
-          <div className="flex items-center gap-2 bg-indigo-600/10 border border-indigo-500/15 px-3 py-1.5 rounded-lg text-indigo-400 text-xs font-semibold">
-            <span>Profile: <strong className="text-zinc-200">{activeAccount.name}</strong></span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 px-4 py-2 rounded-md text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <Upload size={14} />
+              <span>Import MT5</span>
+            </button>
+            <div className="flex items-center gap-2 bg-indigo-600/10 border border-indigo-500/15 px-3 py-1.5 rounded-lg text-indigo-400 text-xs font-semibold">
+              <span>Profile: <strong className="text-zinc-200">{activeAccount.name}</strong></span>
+            </div>
           </div>
         </div>
 
@@ -455,9 +755,7 @@ export default function HistoryPage() {
           </div>
         )}
 
-        {/* Filter Toolbar Card */}
         <div className="bg-zinc-900/20 border border-zinc-900/60 p-4 rounded-xl flex flex-col md:flex-row items-center gap-4">
-          {/* Search */}
           <div className="relative w-full md:flex-1">
             <Search size={16} className="absolute left-3 top-3 text-zinc-500" />
             <input
@@ -469,7 +767,6 @@ export default function HistoryPage() {
             />
           </div>
 
-          {/* Direction Filter */}
           <div className="flex items-center gap-2 w-full md:w-auto">
             <span className="text-xs text-zinc-500 font-semibold uppercase shrink-0">Direction</span>
             <div className="relative w-full md:w-32">
@@ -486,7 +783,6 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* Status Filter */}
           <div className="flex items-center gap-2 w-full md:w-auto">
             <span className="text-xs text-zinc-500 font-semibold uppercase shrink-0">Status</span>
             <div className="relative w-full md:w-32">
@@ -504,7 +800,6 @@ export default function HistoryPage() {
           </div>
         </div>
 
-        {/* Main Ledger Table Card */}
         <div className="bg-zinc-900/10 border border-zinc-900/60 rounded-xl overflow-hidden">
           <div className="overflow-x-auto w-full">
             <table className="w-full text-left border-collapse">
@@ -551,14 +846,13 @@ export default function HistoryPage() {
                     const isOpenTrade = trade.status === 'OPEN';
                     return (
                       <tr key={trade.id} className="hover:bg-zinc-900/20 transition-colors text-zinc-300">
-                        {/* Pair Symbol */}
                         <td className="px-5 py-3.5 whitespace-nowrap">
                           <div className="flex flex-col gap-1">
                             <span className="font-bold text-white leading-none">{trade.pair}</span>
                             {trade.setup_tags && trade.setup_tags.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {trade.setup_tags.map(tag => (
-                                  <span key={tag} className="text-[9px] font-semibold bg-zinc-900 border border-zinc-800 text-zinc-500 px-1 py-0.5 rounded">
+                                  <span key={tag} className="text-[9px] font-semibold bg-zinc-900 border border-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">
                                     {tag}
                                   </span>
                                 ))}
@@ -567,7 +861,6 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        {/* Direction & Grade */}
                         <td className="px-5 py-3.5">
                           <div className="flex flex-col gap-1 items-start">
                             <div className="flex gap-1.5">
@@ -601,34 +894,28 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        {/* Lot Volume */}
                         <td className="px-5 py-3.5 font-medium whitespace-nowrap">
                           {trade.lot_size} Lots
                         </td>
 
-                        {/* Entry Price */}
                         <td className="px-5 py-3.5 font-mono text-zinc-400 hidden sm:table-cell">
                           {Number(trade.entry_price).toFixed(5)}
                         </td>
 
-                        {/* Stop Loss */}
                         <td className="px-5 py-3.5 font-mono text-zinc-500 hidden sm:table-cell">
                           {Number(trade.stop_loss).toFixed(5)}
                         </td>
 
-                        {/* Take Profit */}
                         <td className="px-5 py-3.5 font-mono text-zinc-500 hidden sm:table-cell">
                           {Number(trade.take_profit).toFixed(5)}
                         </td>
 
-                        {/* Exit Price */}
                         <td className="px-5 py-3.5 font-mono text-zinc-400 hidden sm:table-cell">
                           {trade.exit_price ? Number(trade.exit_price).toFixed(5) : (
                             <span className="text-[10px] text-amber-500 font-semibold">Open</span>
                           )}
                         </td>
 
-                        {/* P&L */}
                         <td className="px-5 py-3.5 font-semibold">
                           {isOpenTrade ? (
                             <span className="text-[10px] text-zinc-400 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700 uppercase">
@@ -641,7 +928,6 @@ export default function HistoryPage() {
                           )}
                         </td>
 
-                        {/* Execution Date & Time */}
                         <td className="px-5 py-3.5 whitespace-nowrap text-xs text-zinc-500">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5 text-zinc-300 font-medium">
@@ -654,7 +940,6 @@ export default function HistoryPage() {
                           </div>
                         </td>
 
-                        {/* Actions */}
                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-2">
                             {trade.screenshot_url && (
@@ -669,7 +954,6 @@ export default function HistoryPage() {
                               </a>
                             )}
 
-                            {/* Edit / Close button */}
                             <button
                               onClick={() => setEditingTrade(trade)}
                               className={`p-1 rounded hover:bg-zinc-900 transition-colors cursor-pointer ${

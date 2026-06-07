@@ -72,6 +72,11 @@ export interface Trade {
   open_time: string;
   close_time?: string;
   created_at: string;
+  import_source?: 'MANUAL' | 'MT5_CSV' | 'MT5_HTML';
+  external_ticket?: string;
+  commission?: number;
+  swap?: number;
+  duration_seconds?: number;
 }
 
 export interface DailyReflection {
@@ -93,4 +98,10 @@ export interface Profile {
   full_name?: string;
   avatar_url?: string;
   created_at: string;
+  stripe_customer_id?: string;
+  subscription_id?: string;
+  subscription_status?: string; // 'free', 'trialing', 'active', 'canceled'
+  price_id?: string;
+  current_period_end?: string;
 }
+

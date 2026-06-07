@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAccount } from '@/components/AccountProvider';
-import { saveAccount, archiveAccount } from '@/lib/db';
-import { AccountType, TradingStyle, TradingGoal, PropFirmName, PropChallengeType } from '@/types';
+import { saveAccount, archiveAccount, fetchUserProfile } from '@/lib/db';
+import { AccountType, TradingStyle, TradingGoal, PropFirmName, PropChallengeType, Profile } from '@/types';
 import { CreditCard, Award, Layers, Plus, ShieldCheck, CheckCircle2, ChevronRight, AlertCircle, Archive, RotateCcw } from 'lucide-react';
 
 export default function AccountsPage() {
@@ -31,6 +31,70 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Profile & billing states
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  // Fetch profile on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const userProfile = await fetchUserProfile();
+        setProfile(userProfile);
+      } catch (err) {
+        console.error('Error fetching user profile:', err);
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    loadProfile();
+  }, []);
+
+  const handlePortalRedirect = async () => {
+    setPortalLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.error || 'Failed to initiate customer billing portal.');
+      }
+    } catch (err: any) {
+      console.error('Customer portal redirection error:', err);
+      setError('Billing portal error. Try again later.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleUpgradeRedirect = async () => {
+    setPortalLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.error || 'Failed to initiate checkout.');
+      }
+    } catch (err: any) {
+      console.error('Checkout redirection error:', err);
+      setError('Billing checkout error. Try again later.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   const handleArchiveToggle = async (id: string, isArchived: boolean, e: React.MouseEvent) => {
     e.stopPropagation(); // Stop click from selecting the card
@@ -239,6 +303,8 @@ export default function AccountsPage() {
               );
             })}
           </div>
+
+
 
           {/* Archived Profiles Section */}
           {accounts.some(a => a.is_archived) && (

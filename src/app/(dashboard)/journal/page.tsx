@@ -5,7 +5,6 @@ import { saveTrade, isMockMode } from '@/lib/db';
 import { TradeDirection, TradeStatus, TradingSession, SetupGrade, PreTradeState } from '@/types';
 import { useRouter } from 'next/navigation';
 import { PlusCircle, ShieldAlert, Sparkles, Image as ImageIcon, Upload, X, Link as LinkIcon, Clipboard } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { useAccount } from '@/components/AccountProvider';
 import Link from 'next/link';
 
@@ -324,26 +323,20 @@ export default function JournalPage() {
         if (isMockMode) {
           finalScreenshotUrl = screenshotPreview; // Store base64 data string locally
         } else {
-          const supabase = createClient();
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) throw new Error('Unauthenticated');
+          const formData = new FormData();
+          formData.append('file', screenshotFile);
 
-          const fileExt = screenshotFile.name.split('.').pop();
-          const fileName = `${user.id}/${Date.now()}.${fileExt}`;
-          
-          const { error: uploadError } = await supabase.storage
-            .from('trade-attachments')
-            .upload(fileName, screenshotFile, {
-              cacheControl: '3600',
-              upsert: true
-            });
+          const uploadRes = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
 
-          if (uploadError) throw uploadError;
+          if (!uploadRes.ok) {
+            const errData = await uploadRes.json();
+            throw new Error(errData.error || 'Failed to upload screenshot.');
+          }
 
-          const { data: { publicUrl } } = supabase.storage
-            .from('trade-attachments')
-            .getPublicUrl(fileName);
-
+          const { publicUrl } = await uploadRes.json();
           finalScreenshotUrl = publicUrl;
         }
       }

@@ -1,8 +1,23 @@
-import { createClient } from './supabase/client';
-import { Trade, DailyReflection, Account, PropFirmProfile } from '@/types';
+import { Trade, DailyReflection, Account, PropFirmProfile, Profile } from '@/types';
 
-export const isMockMode = !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+export const isMockMode = (typeof window !== 'undefined' && localStorage.getItem('trader_dna_demo_mode') === 'true') ||
+                           !process.env.NEXT_PUBLIC_SUPABASE_URL ||
                            process.env.NEXT_PUBLIC_SUPABASE_URL.includes('your-supabase-project');
+
+async function queryDb(action: string, payload?: any) {
+  const response = await fetch('/api/db', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload })
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`DB query failed: ${errorText}`);
+  }
+  const result = await response.json();
+  if (result.error) throw new Error(result.error);
+  return result.data;
+}
 
 const TRADES_KEY = 'trader_dna_trades';
 const REFLECTIONS_KEY = 'trader_dna_reflections';
@@ -198,7 +213,50 @@ export const seedMockData = () => {
 };
 
 // ==========================================
-// 1. ACCOUNT PROFILE CRUD FUNCTIONS
+// 1. USER PROFILE CRUD FUNCTIONS
+// ==========================================
+
+export async function fetchUserProfile(): Promise<Profile | null> {
+  if (isMockMode) {
+    const savedUser = localStorage.getItem('trader_dna_demo_user');
+    const userObj = savedUser ? JSON.parse(savedUser) : null;
+    if (!userObj) return null;
+    
+    const mockProfileKey = 'trader_dna_mock_profile';
+    const savedProfile = localStorage.getItem(mockProfileKey);
+    if (savedProfile) {
+      return JSON.parse(savedProfile);
+    }
+
+    const defaultProfile: Profile = {
+      id: userObj.id || 'demo-user',
+      email: userObj.email || 'demo@traderdna.com',
+      full_name: userObj.full_name || 'Prop Trader Demo',
+      created_at: new Date().toISOString(),
+      subscription_status: 'active', // default active in mock/offline mode
+    };
+    localStorage.setItem(mockProfileKey, JSON.stringify(defaultProfile));
+    return defaultProfile;
+  }
+
+  return queryDb('fetchUserProfile');
+}
+
+export async function updateUserProfile(updates: Partial<Profile>): Promise<Profile> {
+  if (isMockMode) {
+    const mockProfileKey = 'trader_dna_mock_profile';
+    const profile = await fetchUserProfile();
+    if (!profile) throw new Error('No mock profile found');
+    const updated = { ...profile, ...updates };
+    localStorage.setItem(mockProfileKey, JSON.stringify(updated));
+    return updated;
+  }
+
+  return queryDb('updateUserProfile', { updates });
+}
+
+// ==========================================
+// 1.5 ACCOUNT PROFILE CRUD FUNCTIONS
 // ==========================================
 
 export async function fetchAccounts(): Promise<Account[]> {
@@ -208,14 +266,7 @@ export async function fetchAccounts(): Promise<Account[]> {
     return data ? JSON.parse(data) : [];
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('created_at', { ascending: true });
-
-  if (error) throw error;
-  return data || [];
+  return queryDb('fetchAccounts');
 }
 
 export async function archiveAccount(id: string, archive: boolean): Promise<void> {
@@ -229,13 +280,7 @@ export async function archiveAccount(id: string, archive: boolean): Promise<void
     return;
   }
 
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('accounts')
-    .update({ is_archived: archive })
-    .eq('id', id);
-
-  if (error) throw error;
+  return queryDb('archiveAccount', { id, archive });
 }
 
 export async function saveAccount(
@@ -275,29 +320,7 @@ export async function saveAccount(
     return newAccount;
   }
 
-  const supabase = createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData?.user) throw new Error('Unauthenticated');
-
-  // Insert Account
-  const { data: dbAccount, error: accError } = await supabase
-    .from('accounts')
-    .insert([{ ...account, user_id: userData.user.id }])
-    .select()
-    .single();
-
-  if (accError) throw accError;
-
-  // Insert Prop Profile if applicable
-  if (propFirmDetails && (account.account_type === 'Prop Challenge' || account.account_type === 'Funded Account')) {
-    const { error: propError } = await supabase
-      .from('prop_firm_profiles')
-      .insert([{ ...propFirmDetails, account_id: dbAccount.id }]);
-
-    if (propError) throw propError;
-  }
-
-  return dbAccount;
+  return queryDb('saveAccount', { account, propFirmDetails });
 }
 
 export async function fetchPropFirmProfile(accountId: string): Promise<PropFirmProfile | null> {
@@ -309,15 +332,7 @@ export async function fetchPropFirmProfile(accountId: string): Promise<PropFirmP
     return profiles.find(p => p.account_id === accountId) || null;
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('prop_firm_profiles')
-    .select('*')
-    .eq('account_id', accountId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data;
+  return queryDb('fetchPropFirmProfile', { accountId });
 }
 
 // ==========================================
@@ -335,19 +350,7 @@ export async function fetchTrades(accountId?: string): Promise<Trade[]> {
     return allTrades;
   }
 
-  const supabase = createClient();
-  let query = supabase
-    .from('trades')
-    .select('*');
-
-  if (accountId) {
-    query = query.eq('account_id', accountId);
-  }
-
-  const { data, error } = await query.order('open_time', { ascending: false });
-
-  if (error) throw error;
-  return data || [];
+  return queryDb('fetchTrades', { accountId });
 }
 
 export async function saveTrade(
@@ -368,18 +371,7 @@ export async function saveTrade(
     return newTrade;
   }
 
-  const supabase = createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData?.user) throw new Error('Unauthenticated');
-
-  const { data, error } = await supabase
-    .from('trades')
-    .insert([{ ...trade, user_id: userData.user.id }])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return queryDb('saveTrade', { trade });
 }
 
 export async function deleteTrade(id: string): Promise<void> {
@@ -393,13 +385,7 @@ export async function deleteTrade(id: string): Promise<void> {
     return;
   }
 
-  const supabase = createClient();
-  const { error } = await supabase
-    .from('trades')
-    .delete()
-    .eq('id', id);
-
-  if (error) throw error;
+  return queryDb('deleteTrade', { id });
 }
 
 export async function updateTrade(
@@ -417,16 +403,7 @@ export async function updateTrade(
     return trades[idx];
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('trades')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return queryDb('updateTrade', { id, updates });
 }
 
 // ==========================================
@@ -444,19 +421,7 @@ export async function fetchReflections(accountId?: string): Promise<DailyReflect
     return allRefs;
   }
 
-  const supabase = createClient();
-  let query = supabase
-    .from('daily_reflections')
-    .select('*');
-
-  if (accountId) {
-    query = query.eq('account_id', accountId);
-  }
-
-  const { data, error } = await query.order('reflection_date', { ascending: false });
-
-  if (error) throw error;
-  return data || [];
+  return queryDb('fetchReflections', { accountId });
 }
 
 export async function saveReflection(
@@ -489,23 +454,7 @@ export async function saveReflection(
     return newRef;
   }
 
-  const supabase = createClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData?.user) throw new Error('Unauthenticated');
-
-  const { data, error } = await supabase
-    .from('daily_reflections')
-    .upsert({ 
-      ...reflection, 
-      user_id: userData.user.id 
-    }, { 
-      onConflict: 'user_id,reflection_date' 
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return queryDb('saveReflection', { reflection });
 }
 
 export function calculateReflectionStreak(reflections: DailyReflection[]): number {

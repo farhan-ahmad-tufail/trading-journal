@@ -73,6 +73,9 @@ export default function DashboardPage() {
   const [hasReflectedToday, setHasReflectedToday] = useState(false);
   const [blowUpProbability, setBlowUpProbability] = useState<number | null>(null);
   const [blowUpLevel, setBlowUpLevel] = useState<'LOW' | 'MEDIUM' | 'HIGH' | null>(null);
+  const [blowUpReasons, setBlowUpReasons] = useState<string[]>([]);
+  const [blowUpActions, setBlowUpActions] = useState<string[]>([]);
+  const [showBlowUpDetails, setShowBlowUpDetails] = useState(false);
 
   useEffect(() => {
     if (accountLoading) return;
@@ -127,10 +130,31 @@ export default function DashboardPage() {
         const reflected = reflectionsData.some(r => r.reflection_date === todayStr);
         setHasReflectedToday(reflected);
 
-        // 3. Calculate Blow-Up Risk
-        const risk = predictBlowUpRisk(tradesData, reflectionsData);
-        setBlowUpProbability(risk.probability);
-        setBlowUpLevel(risk.level);
+        // 3. Fetch AI Blow-Up Risk
+        try {
+          const riskResponse = await fetch('/api/predict-blowup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accountId: activeAccount!.id })
+          });
+          
+          if (riskResponse.ok) {
+            const riskData = await riskResponse.json();
+            setBlowUpProbability(riskData.prediction.failure_probability);
+            setBlowUpLevel(riskData.prediction.risk_level);
+            setBlowUpReasons(riskData.prediction.reasons || []);
+            setBlowUpActions(riskData.prediction.suggested_actions || []);
+          } else {
+            throw new Error('API failed');
+          }
+        } catch (apiErr) {
+          // Fallback to local offline prediction logic
+          const risk = predictBlowUpRisk(tradesData, reflectionsData);
+          setBlowUpProbability(risk.probability);
+          setBlowUpLevel(risk.level);
+          setBlowUpReasons(risk.reasons);
+          setBlowUpActions(risk.actions);
+        }
 
       } catch (err) {
         console.error('Failed to load dashboard metrics', err);
@@ -457,20 +481,50 @@ export default function DashboardPage() {
           <div className="flex-1 flex flex-col gap-4 justify-between mt-2">
             <div className="flex flex-col gap-3">
               {/* AI Account Shield (Blow-up Predictor) */}
-              <div className="bg-zinc-900/40 border border-zinc-900/60 p-4 rounded-lg flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="text-xs text-zinc-500">AI Account Shield</span>
-                  <span className="text-sm font-bold text-zinc-300 mt-1">7-Day Failure Risk</span>
+              <div 
+                onClick={() => setShowBlowUpDetails(!showBlowUpDetails)}
+                className="bg-zinc-900/40 border border-zinc-900/60 p-4 rounded-lg flex flex-col gap-3 cursor-pointer hover:border-zinc-800 transition-colors"
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex flex-col">
+                    <span className="text-xs text-zinc-500">AI Account Shield</span>
+                    <span className="text-sm font-bold text-zinc-300 mt-1">7-Day Failure Risk</span>
+                  </div>
+                  {blowUpProbability !== null && (
+                    <div className={`text-[10px] font-bold px-2 py-1 rounded border ${
+                      blowUpLevel === 'HIGH'
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse'
+                        : blowUpLevel === 'MEDIUM'
+                        ? 'bg-amber-500/10 text-amber-550 border-amber-500/20'
+                        : 'bg-emerald-500/10 text-emerald-450 border-emerald-500/20'
+                    }`}>
+                      {blowUpProbability}% {blowUpLevel}
+                    </div>
+                  )}
                 </div>
-                {blowUpProbability !== null && (
-                  <div className={`text-xs font-bold px-2 py-1 rounded border ${
-                    blowUpLevel === 'HIGH'
-                      ? 'bg-red-500/10 text-red-400 border-red-500/20 animate-pulse'
-                      : blowUpLevel === 'MEDIUM'
-                      ? 'bg-amber-500/10 text-amber-550 border-amber-500/20'
-                      : 'bg-emerald-500/10 text-emerald-450 border-emerald-500/20'
-                  }`}>
-                    {blowUpProbability}% {blowUpLevel}
+
+                {showBlowUpDetails && (
+                  <div className="border-t border-zinc-900/80 pt-3 flex flex-col gap-3 text-xs animate-in fade-in duration-200">
+                    {blowUpReasons.length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <span className="font-semibold text-zinc-400">Risk Triggers:</span>
+                        <ul className="list-disc list-inside text-zinc-500 space-y-0.5">
+                          {blowUpReasons.map((reason, i) => (
+                            <li key={i}>{reason}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {blowUpActions.length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        <span className="font-semibold text-indigo-400">Recommended Steps:</span>
+                        <ul className="list-disc list-inside text-zinc-500 space-y-0.5">
+                          {blowUpActions.map((action, i) => (
+                            <li key={i}>{action}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

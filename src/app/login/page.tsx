@@ -7,13 +7,9 @@ import { Mail, Lock, ShieldAlert, BarChart3, BrainCircuit, Activity } from 'luci
 import { isMockMode } from '@/lib/db';
 
 export default function LoginPage() {
-  const { user, loading, signInWithGoogle, signInWithEmail } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isRegister, setIsRegister] = useState(false);
+  const { user, loading, signInWithGoogle, signInAsGuest } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -22,33 +18,11 @@ export default function LoginPage() {
     }
   }, [user, loading, router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-
+  const handleGuestLogin = async () => {
     setError(null);
-    setMessage(null);
-    setAuthLoading(true);
-
-    try {
-      if (isMockMode) {
-        await signInWithEmail(email);
-        return;
-      }
-
-      await signInWithEmail(email, password);
-      setMessage('Check your email for the magic sign-in link!');
-    } catch (err: any) {
-      setError(err.message || 'An error occurred during authentication.');
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleDemoLogin = async () => {
     setAuthLoading(true);
     try {
-      await signInWithEmail('demo@traderdna.com');
+      await signInAsGuest();
     } catch (err: any) {
       setError(err.message || 'Could not launch sandbox.');
     } finally {
@@ -108,9 +82,9 @@ export default function LoginPage() {
       <div className="flex-1 flex flex-col justify-center items-center p-6 sm:p-12 relative">
         <div className="w-full max-w-md flex flex-col gap-8">
           <div className="flex flex-col gap-2">
-            <h2 className="text-2xl font-bold tracking-tight text-white">Welcome back</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-white">Get started with TraderDNA</h2>
             <p className="text-sm text-zinc-400">
-              Sign in to manage your journal and monitor drawdown parameters.
+              Sign in with your Google account to save parameters, or try the platform instantly in guest mode.
             </p>
           </div>
 
@@ -121,75 +95,11 @@ export default function LoginPage() {
             </div>
           )}
 
-          {message && (
-            <div className="flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 rounded-md text-emerald-400 text-sm">
-              <Mail size={18} className="shrink-0 mt-0.5" />
-              <span>{message}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Email Address</label>
-              <div className="relative">
-                <Mail size={16} className="absolute left-3 top-3.5 text-zinc-500" />
-                <input
-                  id="email"
-                  type="email"
-                  placeholder="name@example.com"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-700 outline-none rounded-md py-2.5 pl-10 pr-4 text-sm text-zinc-200 placeholder:text-zinc-600 transition-colors"
-                />
-              </div>
-            </div>
-
-            {!isMockMode && (
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Password</label>
-                <div className="relative">
-                  <Lock size={16} className="absolute left-3 top-3.5 text-zinc-500" />
-                  <input
-                    id="password"
-                    type="password"
-                    placeholder="Enter password (optional for magic links)"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-800 focus:border-zinc-700 outline-none rounded-md py-2.5 pl-10 pr-4 text-sm text-zinc-200 placeholder:text-zinc-600 transition-colors"
-                  />
-                </div>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="mt-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-700 text-white font-medium text-sm rounded-md py-2.5 transition-colors cursor-pointer flex items-center justify-center gap-2"
-            >
-              {authLoading ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-              ) : isMockMode ? (
-                'Sign In'
-              ) : isRegister ? (
-                'Send Activation Link'
-              ) : (
-                'Sign In with Magic Link'
-              )}
-            </button>
-          </form>
-
-          <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-zinc-900"></div>
-            <span className="flex-shrink mx-4 text-xs font-medium text-zinc-500 uppercase tracking-wide">Or continue with</span>
-            <div className="flex-grow border-t border-zinc-900"></div>
-          </div>
-
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3.5">
             <button
               onClick={() => signInWithGoogle()}
               disabled={authLoading}
-              className="flex items-center justify-center gap-2.5 w-full bg-zinc-900 hover:bg-zinc-900/80 border border-zinc-800 text-zinc-300 font-medium text-sm rounded-md py-2.5 transition-colors cursor-pointer"
+              className="flex items-center justify-center gap-2.5 w-full bg-indigo-650 hover:bg-indigo-550 border border-indigo-600 text-white font-bold text-sm rounded-md py-3.5 transition-all cursor-pointer shadow-md"
             >
               <svg className="h-4 w-4" viewBox="0 0 24 24">
                 <path
@@ -209,27 +119,23 @@ export default function LoginPage() {
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                 />
               </svg>
-              <span>Google SSO</span>
+              <span>Sign In with Google</span>
             </button>
 
-            {isMockMode && (
-              <button
-                type="button"
-                onClick={handleDemoLogin}
-                disabled={authLoading}
-                className="flex items-center justify-center gap-2 w-full bg-indigo-600/10 hover:bg-indigo-600/15 border border-indigo-500/25 text-indigo-400 font-semibold text-sm rounded-md py-2.5 transition-colors cursor-pointer"
-              >
-                <Activity size={16} />
-                <span>Launch Demo Trial (Sandbox Mode)</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleGuestLogin}
+              disabled={authLoading}
+              className="flex items-center justify-center gap-2 w-full bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 text-zinc-300 font-semibold text-sm rounded-md py-3.5 transition-colors cursor-pointer"
+            >
+              <Activity size={16} className="text-zinc-500" />
+              <span>Explore as Guest (Try Demo Mode)</span>
+            </button>
           </div>
 
-          {isMockMode && (
-            <div className="bg-zinc-900/40 border border-zinc-900/60 p-3 rounded text-zinc-500 text-xs leading-relaxed text-center">
-              💡 <strong>CTO Sandbox Notice</strong>: The app is running in local preview mode. Use the button above or type any email to explore the journal and dashboard instantly.
-            </div>
-          )}
+          <div className="bg-zinc-900/40 border border-zinc-900/60 p-3.5 rounded-lg text-zinc-500 text-xs leading-relaxed text-center">
+            💡 <strong>Sandbox Guest Mode</strong>: Enter instantly without an account. All data logged during the guest session is stored privately in your browser local storage.
+          </div>
         </div>
       </div>
     </div>

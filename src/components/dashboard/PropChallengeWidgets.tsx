@@ -2,12 +2,28 @@
 
 import React from 'react';
 import { Account, PropFirmProfile, Trade } from '@/types';
-import { Target, AlertTriangle, ShieldCheck, Calendar, Activity, CheckCircle } from 'lucide-react';
+import { Target, AlertTriangle, ShieldCheck, Calendar, Activity, Flame } from 'lucide-react';
 
 interface PropChallengeWidgetsProps {
   account: Account;
   profile: PropFirmProfile;
   trades: Trade[];
+}
+
+// Helper PnL Calculator
+function calculatePnlEstimate(entry: number, exit: number, size: number, dir: 'LONG' | 'SHORT', symbol: string): number {
+  const cleanSym = symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const priceDiff = dir === 'LONG' ? (exit - entry) : (entry - exit);
+
+  if (cleanSym.includes('XAU') || cleanSym.includes('GOLD')) return priceDiff * size * 100;
+  if (cleanSym.includes('XAG') || cleanSym.includes('SILVER')) return priceDiff * size * 5000;
+  if (cleanSym.includes('US30') || cleanSym.includes('DJ30') || cleanSym.includes('DOW')) return priceDiff * size * 1;
+  if (cleanSym.includes('NAS100') || cleanSym.includes('NAS') || cleanSym.includes('USTEC') || cleanSym.includes('US100') || cleanSym.includes('NDX')) return priceDiff * size * 1;
+  if (cleanSym.includes('SPX500') || cleanSym.includes('SPX') || cleanSym.includes('US500') || cleanSym.includes('SP500')) return priceDiff * size * 10;
+  if (cleanSym.includes('GER30') || cleanSym.includes('GER40') || cleanSym.includes('DE30') || cleanSym.includes('DE40') || cleanSym.includes('DAX')) return priceDiff * size * 1;
+  if (cleanSym.endsWith('JPY')) return priceDiff * size * 1000;
+  if (cleanSym.length === 6) return priceDiff * size * 100000;
+  return priceDiff * size;
 }
 
 export default function PropChallengeWidgets({ account, profile, trades }: PropChallengeWidgetsProps) {
@@ -24,7 +40,7 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
   const targetProgressPct = Math.min(Math.max((totalPnL / targetAmount) * 100, 0), 100);
   const isTargetAchieved = totalPnL >= targetAmount;
 
-  // 3. Daily Drawdown
+  // 3. Daily Drawdown Reset Time Bounds
   const getResetBounds = (tz?: 'Local' | 'UTC' | 'EST') => {
     const now = new Date();
     if (tz === 'UTC') {
@@ -61,7 +77,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
       }
     }
     
-    // Default: Local Time
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     return { start, end: start + 24 * 60 * 60 * 1000 };
   };
@@ -77,8 +92,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
   const dailyDrawdownPct = profile.daily_drawdown_pct || 5;
   const dailyLimitAmount = initialSize * (dailyDrawdownPct / 100);
   
-  // Today's Closed Loss is todayPnL if negative, else 0 (or net if net is negative)
-  // Usually, daily drawdown is calculated on net daily PnL (if negative)
   const todayNetLoss = todayPnL < 0 ? Math.abs(todayPnL) : 0;
   const dailyDrawdownRemaining = Math.max(dailyLimitAmount - todayNetLoss, 0);
   const dailyDrawdownUsedPct = (todayNetLoss / dailyLimitAmount) * 100;
@@ -88,26 +101,67 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
   const maxDrawdownPct = profile.max_drawdown_pct || 10;
   const maxLimitAmount = initialSize * (maxDrawdownPct / 100);
   
-  // Max drawdown relative to initial size (static drawdown)
   const totalNetLoss = totalPnL < 0 ? Math.abs(totalPnL) : 0;
   const maxDrawdownRemaining = Math.max(maxLimitAmount - totalNetLoss, 0);
   const maxDrawdownUsedPct = (totalNetLoss / maxLimitAmount) * 100;
   const isMaxLimitBreached = totalNetLoss >= maxLimitAmount;
 
-  // 5. Trading Days Completed
+  // 5. Trading Days
   const openDates = new Set(
     trades
       .filter(t => t.open_time)
-      .map(t => new Date(t.open_time).toDateString())
+      .map(t => t.open_time.split('T')[0])
   );
   const tradingDaysCompleted = openDates.size;
   const minTradingDays = profile.min_trading_days || 0;
   const isTradingDaysAchieved = tradingDaysCompleted >= minTradingDays;
 
-  // 6. Account Health State
-  // Green: Not breached and drawdown remaining > 40% of limit
-  // Yellow: Not breached but drawdown remaining <= 40% of limit
-  // Red: Breached
+  // 6. Advanced Analytics & Alerts (Overtrading, Sizing Risk, Consistency)
+  const tradesByDayMap: Record<string, number> = {};
+  closedTrades.forEach(t => {
+    const day = t.open_time.split('T')[0];
+    tradesByDayMap[day] = (tradesByDayMap[day] || 0) + 1;
+  });
+  const totalDaysTraded = Object.keys(tradesByDayMap).length;
+  const avgTradesPerDay = totalDaysTraded > 0 ? (closedTrades.length / totalDaysTraded) : 0;
+
+  let highRiskTradeCount = 0;
+  trades.forEach(t => {
+    if (t.entry_price && t.stop_loss && t.lot_size) {
+      const slPnl = calculatePnlEstimate(t.entry_price, t.stop_loss, t.lot_size, t.direction, t.pair);
+      const riskAmount = Math.abs(slPnl);
+      if (riskAmount > initialSize * 0.02) {
+        highRiskTradeCount++;
+      }
+    }
+  });
+
+  const dailyPnLMap: Record<string, number> = {};
+  closedTrades.forEach(t => {
+    if (!t.close_time) return;
+    const day = t.close_time.split('T')[0];
+    dailyPnLMap[day] = (dailyPnLMap[day] || 0) + (t.pnl || 0);
+  });
+  const maxDayProfit = Math.max(...Object.values(dailyPnLMap).filter(val => val > 0), 0);
+  const isConsistencyViolated = maxDayProfit > targetAmount * 0.5 && targetAmount > 0;
+  const consistencyPct = targetAmount > 0 ? (maxDayProfit / targetAmount) * 100 : 0;
+
+  const alerts: string[] = [];
+  if (todayTrades.length >= 5) {
+    alerts.push(`Warning: You have taken ${todayTrades.length} trades today (historical average: ${avgTradesPerDay.toFixed(1)}). Revenge trading risk is extremely high. Step away.`);
+  } else if (todayTrades.length >= 3 && todayTrades.length > avgTradesPerDay * 1.5) {
+    alerts.push(`Notice: Today's trade count (${todayTrades.length}) has exceeded your daily average of ${avgTradesPerDay.toFixed(1)}. Focus on quality, not volume.`);
+  }
+
+  if (highRiskTradeCount > 0) {
+    alerts.push(`Risk Alarm: Detected ${highRiskTradeCount} setups risking > 2.0% of starting capital in stop-loss parameters. Reduce lot sizes immediately to preserve your evaluation desk.`);
+  }
+
+  if (isConsistencyViolated) {
+    alerts.push(`Consistency Alert: Single-day profit ($${maxDayProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}) represents ${consistencyPct.toFixed(0)}% of your target (FTMO/5ers rules mandate consistency limits). Try to distribute earnings uniformly.`);
+  }
+
+  // 7. Account Health State
   let health: 'Green' | 'Yellow' | 'Red' = 'Green';
   let healthMessage = 'Account Healthy';
 
@@ -116,20 +170,18 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
     healthMessage = 'Limit Breached!';
   } else if (
     dailyDrawdownRemaining < dailyLimitAmount * 0.4 ||
-    maxDrawdownRemaining < maxLimitAmount * 0.4
+    maxDrawdownRemaining < maxLimitAmount * 0.4 ||
+    alerts.length > 0
   ) {
     health = 'Yellow';
-    healthMessage = 'Drawdown Warning';
+    healthMessage = 'Drawdown / Risk Warning';
   }
 
   const getHealthBadgeClass = (status: 'Green' | 'Yellow' | 'Red') => {
     switch (status) {
-      case 'Red':
-        return 'bg-red-500/10 text-red-500 border border-red-500/20';
-      case 'Yellow':
-        return 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
-      default:
-        return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+      case 'Red': return 'bg-red-500/10 text-red-500 border border-red-500/20';
+      case 'Yellow': return 'bg-amber-500/10 text-amber-500 border border-amber-500/20';
+      default: return 'bg-emerald-500/10 text-emerald-450 border border-emerald-500/20';
     }
   };
 
@@ -143,13 +195,11 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Account Balance Details */}
           <div className="text-right hidden sm:block">
             <span className="text-[10px] text-zinc-500 font-semibold block uppercase">Current Balance</span>
             <span className="text-xs font-bold text-zinc-300">${currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
           </div>
 
-          {/* Account Health */}
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Health:</span>
             <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wide flex items-center gap-1 ${getHealthBadgeClass(health)}`}>
@@ -162,8 +212,7 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-1">
-        {/* Profit Target */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
         <div className="bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-lg flex flex-col justify-between h-28 relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-0.5">
@@ -172,7 +221,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
             </div>
             <Target size={14} className={isTargetAchieved ? 'text-emerald-400' : 'text-zinc-500'} />
           </div>
-
           <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-500">
               <span>{targetProgressPct.toFixed(0)}% Completed</span>
@@ -189,7 +237,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
           </div>
         </div>
 
-        {/* Daily Drawdown Gauge */}
         <div className="bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-lg flex flex-col justify-between h-28 relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-0.5">
@@ -200,7 +247,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
             </div>
             <AlertTriangle size={14} className={isDailyLimitBreached ? 'text-red-500 animate-pulse' : 'text-zinc-500'} />
           </div>
-
           <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-500">
               <span>{dailyDrawdownUsedPct.toFixed(0)}% Used</span>
@@ -219,7 +265,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
           </div>
         </div>
 
-        {/* Max Drawdown Gauge */}
         <div className="bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-lg flex flex-col justify-between h-28 relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-0.5">
@@ -230,7 +275,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
             </div>
             <AlertTriangle size={14} className={isMaxLimitBreached ? 'text-red-500 animate-pulse' : 'text-zinc-500'} />
           </div>
-
           <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-500">
               <span>{maxDrawdownUsedPct.toFixed(0)}% Used</span>
@@ -249,7 +293,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
           </div>
         </div>
 
-        {/* Trading Days Completed */}
         <div className="bg-zinc-950/40 border border-zinc-900/60 p-4 rounded-lg flex flex-col justify-between h-28 relative overflow-hidden">
           <div className="flex items-start justify-between">
             <div className="flex flex-col gap-0.5">
@@ -260,7 +303,6 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
             </div>
             <Calendar size={14} className={isTradingDaysAchieved ? 'text-emerald-400' : 'text-zinc-500'} />
           </div>
-
           <div className="flex flex-col gap-1.5 mt-2">
             <div className="flex items-center justify-between text-[10px] font-semibold text-zinc-500">
               <span>{minTradingDays > 0 ? `${Math.min((tradingDaysCompleted / minTradingDays) * 100, 100).toFixed(0)}%` : '100%'} Completed</span>
@@ -277,6 +319,20 @@ export default function PropChallengeWidgets({ account, profile, trades }: PropC
           </div>
         </div>
       </div>
+
+      {alerts.length > 0 && (
+        <div className="flex flex-col gap-2 mt-2 border-t border-zinc-900 pt-3">
+          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Prop Desk Warnings</span>
+          <div className="flex flex-col gap-2">
+            {alerts.map((alertMsg, idx) => (
+              <div key={idx} className="flex items-start gap-2.5 bg-amber-500/5 border border-amber-500/10 p-3 rounded-lg text-amber-500 text-xs">
+                <AlertTriangle size={15} className="shrink-0 mt-0.5 animate-pulse" />
+                <span>{alertMsg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
