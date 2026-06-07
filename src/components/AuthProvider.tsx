@@ -65,6 +65,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'fetchUserProfile' })
           });
+
+          // 4. Redirect to dashboard if the user is on the login page
+          if (typeof window !== 'undefined' && window.location.pathname === '/login') {
+            window.location.href = '/';
+          }
         } catch (err) {
           console.error('Error establishing session/profile:', err);
         }
@@ -101,7 +106,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     try {
       await signInWithPopup(auth, googleProvider);
-      router.push('/');
+      // Redirection is handled in the onIdTokenChanged listener 
+      // after the session cookie has been safely set.
     } catch (error) {
       console.error('Firebase Google Sign-In error:', error);
       setLoading(false);
